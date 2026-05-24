@@ -1,0 +1,64 @@
+# ========== Python Bytecode & Cache ==========
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# ========== Virtual Environments ==========
+venv/
+venv311/
+venv_new/
+venv_clean/
+.venv/
+env/
+ENV/
+
+# ========== Environment & Secrets ==========
+.env
+.env.local
+.env.*.local
+*.secret
+
+# ========== Database Files ==========
+*.db
+*.sqlite3
+travel_ai.db
+
+# ========== Redis Dump Files ==========
+dump.rdb
+appendonly.aof
+
+# ========== IDE & Editor ==========
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ========== Docker ==========
+docker-compose.override.yml
+pgdata/
+
+# ========== Logs & Temp ==========
+*.log
+logs/
+temp/
+tmp/
+
+# ========== Distribution / Packaging ==========
+dist/
+build/
+*.egg-info/
+*.egg
+
+# ========== Testing & Coverage ==========
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# ========== Type Checkers & Linters ==========
+.mypy_cache/
+.ruff_cache/
