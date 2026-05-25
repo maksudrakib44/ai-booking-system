@@ -151,7 +151,7 @@ if prompt:
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: #64748B; padding: 16px;'>"
-    "Built with ❤️ by <strong>Maksudur Rahman</strong><br>"
+    "Built with ❤️ by <strong>Md. Maksudul Haque</strong><br>"
     "© 2026 RouteMind AI — AI-Powered Travel Booking Assistant"
     "</div>",
     unsafe_allow_html=True
