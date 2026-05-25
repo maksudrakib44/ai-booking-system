@@ -1,87 +1,41 @@
 import streamlit as st
-import requests
 import uuid
+import asyncio
 from datetime import datetime
+import pytz
+
+# LangChain / LangGraph
+from langchain_core.messages import HumanMessage
+from app.ai.agents.graph import app as agent_app
+from app.ai.agents.state import AgentState
+from app.dependencies import get_user_by_token
+from app.database.session import AsyncSessionLocal
+from app.database.models import User
+from app.config import settings
+from app.database.seed import seed  # will run once to create DB if missing
 
 # ---------- Page Config ----------
-st.set_page_config(
-    page_title="RouteMind AI",
-    page_icon="🚌",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="RouteMind AI", page_icon="🚌", layout="centered")
 
-# ---------- Custom CSS ----------
+# ---------- Custom CSS (same as before) ----------
 st.markdown("""
 <style>
-    /* Modern theme */
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: 700;
-        color: #1E3A8A;
-        text-align: center;
-        margin-bottom: 0.5rem;
-    }
-    .sub-header {
-        font-size: 1.2rem;
-        color: #64748B;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .chat-container {
-        max-width: 800px;
-        margin: 0 auto;
-    }
-    .chat-bubble {
-        padding: 12px 18px;
-        border-radius: 18px;
-        margin-bottom: 12px;
-        max-width: 85%;
-        word-wrap: break-word;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        animation: fadeIn 0.3s ease-in;
-    }
-    .user-bubble {
-        background: linear-gradient(135deg, #3B82F6, #1D4ED8);
-        color: white;
-        margin-left: auto;
-        border-bottom-right-radius: 4px;
-    }
-    .assistant-bubble {
-        background: #F1F5F9;
-        color: #1E293B;
-        margin-right: auto;
-        border-bottom-left-radius: 4px;
-        border: 1px solid #E2E8F0;
-    }
-    .footer {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        background: #0F172A;
-        color: #94A3B8;
-        text-align: center;
-        padding: 8px;
-        font-size: 0.9rem;
-    }
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-    .stTextInput input {
-        border-radius: 20px;
-        border: 2px solid #E2E8F0;
-        padding: 12px 20px;
-        font-size: 1rem;
-    }
-    .stButton button {
-        border-radius: 20px;
-        background: #3B82F6;
-        color: white;
-        border: none;
-        padding: 8px 24px;
-    }
+.chat-bubble {
+    padding: 12px 16px;
+    border-radius: 16px;
+    margin-bottom: 8px;
+    max-width: 80%;
+    word-wrap: break-word;
+}
+.user-bubble {
+    background-color: #e0f0ff;
+    margin-left: auto;
+    text-align: right;
+}
+.assistant-bubble {
+    background-color: #f0f0f0;
+    margin-right: auto;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -92,111 +46,136 @@ if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 if "user_token" not in st.session_state:
     st.session_state.user_token = ""
-if "dark_mode" not in st.session_state:
-    st.session_state.dark_mode = False
+if "agent_state" not in st.session_state:
+    st.session_state.agent_state = {
+        "messages": [],
+        "user_id": "anonymous",
+        "intent": "",
+        "entities": {},
+        "route_options": [],
+        "selected_route": None,
+        "booking_details": None,
+        "final_response": ""
+    }
 
 # ---------- Header ----------
-col1, col2, col3 = st.columns([1, 2, 1])
-with col2:
-    st.markdown('<div class="main-header">🚌 RouteMind AI</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Your intelligent travel copilot — Your Journey, One Conversation Away. </div>', unsafe_allow_html=True)
+st.title("🚌 RouteMind AI")
+st.caption("Your intelligent travel booking copilot — ask me anything about buses!")
 
-# ---------- Sidebar ----------
+# ---------- Sidebar Settings ----------
 with st.sidebar:
-    st.title("⚙️ Settings")
-    
-    # API URL
-    api_url = st.text_input("Backend URL", value="http://localhost:8000/api/v1/chat")
-    
-    # User Token
-    user_token = st.text_input("Your Identity Token", 
-                               value=st.session_state.user_token,
-                               help="A unique string to remember your preferences. Leave empty for anonymous.")
+    st.subheader("⚙️ Settings")
+    user_token = st.text_input("Your User Token", value=st.session_state.user_token,
+                               help="Unique string to remember preferences. Empty = anonymous.")
     if user_token != st.session_state.user_token:
         st.session_state.user_token = user_token
+        # reset session if token changes
         st.session_state.session_id = str(uuid.uuid4())
         st.session_state.messages = []
-        st.success("Token updated! Starting fresh session.")
-    
-    st.divider()
-    
-    # Session Info
-    st.caption(f"Session: {st.session_state.session_id[:8]}...")
-    if st.session_state.user_token:
-        st.caption(f"User: {st.session_state.user_token}")
-    
-    st.divider()
-    
-    # Actions
-    if st.button("🧹 Clear Chat", use_container_width=True):
+        st.session_state.agent_state = {
+            "messages": [],
+            "user_id": "anonymous",
+            "intent": "",
+            "entities": {},
+            "route_options": [],
+            "selected_route": None,
+            "booking_details": None,
+            "final_response": ""
+        }
+    if st.button("🧹 Clear Chat"):
         st.session_state.messages = []
         st.session_state.session_id = str(uuid.uuid4())
+        st.session_state.agent_state = {
+            "messages": [],
+            "user_id": "anonymous",
+            "intent": "",
+            "entities": {},
+            "route_options": [],
+            "selected_route": None,
+            "booking_details": None,
+            "final_response": ""
+        }
         st.rerun()
-    
-    st.divider()
-    st.markdown("**RouteMind AI** v1.0")
-    st.markdown("Powered by Gemini & LangGraph")
 
-# ---------- Main Chat Area ----------
-st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+# ---------- Initialise Database (once) ----------
+@st.cache_resource
+def init_db():
+    # seed the database if it doesn't exist (creates tables + 7-day data)
+    asyncio.run(seed())
+    return True
 
-# Display messages
+_ = init_db()
+
+# ---------- Resolve User ----------
+async def resolve_user():
+    token = st.session_state.user_token or None
+    if not token:
+        return None
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import select
+        result = await db.execute(select(User).where(User.token == token))
+        user = result.scalars().first()
+        if not user:
+            user = User(token=token, preferences={})
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+        return user
+
+# ---------- Chat Display ----------
 for msg in st.session_state.messages:
     if msg["role"] == "user":
-        st.markdown(
-            f'<div class="chat-bubble user-bubble">🧑‍💻 {msg["content"]}</div>', 
-            unsafe_allow_html=True
-        )
+        st.markdown(f'<div class="chat-bubble user-bubble">{msg["content"]}</div>', unsafe_allow_html=True)
     else:
-        st.markdown(
-            f'<div class="chat-bubble assistant-bubble">🚌 {msg["content"]}</div>', 
-            unsafe_allow_html=True
-        )
+        st.markdown(f'<div class="chat-bubble assistant-bubble">{msg["content"]}</div>', unsafe_allow_html=True)
 
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ---------- Chat Input ----------
+# ---------- Input ----------
 prompt = st.chat_input("Where would you like to go today?")
 
 if prompt:
     # Add user message
     st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    # API call
-    headers = {"Content-Type": "application/json"}
-    if st.session_state.user_token:
-        headers["X-User-Token"] = st.session_state.user_token
-    
-    payload = {
-        "message": prompt,
-        "session_id": st.session_state.session_id,
-        "user_id": st.session_state.user_token if st.session_state.user_token else "anonymous"
-    }
-    
-    with st.spinner("🤔 Searching..."):
-        try:
-            resp = requests.post(api_url, json=payload, headers=headers, timeout=30)
-            if resp.status_code == 200:
-                data = resp.json()
-                reply = data["response"]
-                st.session_state.session_id = data["session_id"]
-                st.session_state.messages.append({"role": "assistant", "content": reply})
-                st.rerun()  # refresh to show new messages
-            else:
-                error_msg = f"❌ Backend error: {resp.status_code}"
-                st.session_state.messages.append({"role": "assistant", "content": error_msg})
-                st.rerun()
-        except Exception as e:
-            st.error(f"🚫 Connection failed: {e}")
+
+    # Determine user_id
+    user = asyncio.run(resolve_user())
+    user_id = str(user.id) if user else "anonymous"
+
+    # Update agent state
+    state = st.session_state.agent_state
+    state["user_id"] = user_id
+    if user and user.preferences:
+        state["user_preferences"] = user.preferences
+    state["messages"].append(HumanMessage(content=prompt))
+
+    # Call the agent directly (async)
+    try:
+        new_state = asyncio.run(agent_app.ainvoke(state))
+    except Exception as e:
+        reply = f"❌ Agent error: {e}"
+        st.session_state.messages.append({"role": "assistant", "content": reply})
+        st.rerun()
+
+    # Update stored state
+    st.session_state.agent_state = new_state
+
+    # Extract the last AI message
+    ai_messages = [m for m in new_state["messages"] if m.type == "ai"]
+    if ai_messages:
+        reply = ai_messages[-1].content
+        if isinstance(reply, list):
+            reply = "".join(part.get("text", "") for part in reply if part["type"] == "text")
+        st.session_state.messages.append({"role": "assistant", "content": reply})
+    else:
+        st.session_state.messages.append({"role": "assistant", "content": "I didn't get that."})
+
+    st.rerun()
 
 # ---------- Footer ----------
 st.markdown("---")
-col1, col2, col3 = st.columns([1, 2, 1])
-with col2:
-    st.markdown(
-        "<div style='text-align: center; color: #64748B; padding: 16px;'>"
-        "Built with ❤️ by <strong>Md. Maksudul Haque</strong><br>"
-        "© 2026 RouteMind AI — AI-Powered Travel Booking Assistant"
-        "</div>",
-        unsafe_allow_html=True
-    )
+st.markdown(
+    "<div style='text-align: center; color: #64748B; padding: 16px;'>"
+    "Built with ❤️ by <strong>Md. Maksudul Haque</strong><br>"
+    "© 2026 RouteMind AI — AI-Powered Travel Booking Assistant"
+    "</div>",
+    unsafe_allow_html=True
+)
