@@ -6,7 +6,7 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, Tool
 redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
 
 # ----------------------------------------------------------------------
-# Session serialisation / deserialisation (messages ↔ dict)
+# Session serialisation / deserialisation (unchanged)
 # ----------------------------------------------------------------------
 def _serialize_state(state: dict) -> dict:
     """Convert LangChain message objects to JSON‑safe dicts."""
@@ -63,13 +63,12 @@ async def delete_session(session_id: str):
     await redis_client.delete(f"session:{session_id}")
 
 # ----------------------------------------------------------------------
-# Route search cache
+# Route search cache (updated to accept arbitrary cache keys)
 # ----------------------------------------------------------------------
-async def cache_routes(source: str, destination: str, routes: str, ttl: int = 300):
-    """Cache a route search result for 5 minutes."""
-    key = f"routes:{source.lower()}:{destination.lower()}"
+async def cache_routes(key: str, routes: str, ttl: int = 300):
+    """Cache a route search result under a specific key."""
     await redis_client.set(key, routes, ex=ttl)
 
-async def get_cached_routes(source: str, destination: str) -> str | None:
-    key = f"routes:{source.lower()}:{destination.lower()}"
+async def get_cached_routes(key: str) -> str | None:
+    """Retrieve a cached route search by key."""
     return await redis_client.get(key)

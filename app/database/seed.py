@@ -1,241 +1,158 @@
 import asyncio
-from datetime import datetime
+import random
+from datetime import datetime, timedelta
 from app.database.models import Base, BusRoute
 from app.database.session import engine, AsyncSessionLocal
 from sqlalchemy import select
 
-BUS_SEED_DATA = [
-    # ========== Original 37 routes (forward) ==========
+# Base schedules – each dict describes one service (price, operator, times, etc.)
+BASE_ROUTES = [
     # Dhaka ↔ Sylhet
-    {"id":"B1","operator":"Shohag Paribahan","source":"Dhaka","destination":"Sylhet",
-     "departure_time":datetime(2026,5,25,8,0),"arrival_time":datetime(2026,5,25,15,0),
-     "price":950,"ac":True,"total_seats":40,"available_seats":40},
-    {"id":"B2","operator":"Green Line","source":"Dhaka","destination":"Sylhet",
-     "departure_time":datetime(2026,5,25,7,30),"arrival_time":datetime(2026,5,25,13,30),
-     "price":1350,"ac":True,"total_seats":36,"available_seats":36},
-    {"id":"B3","operator":"Ena Transport","source":"Dhaka","destination":"Sylhet",
-     "departure_time":datetime(2026,5,25,10,0),"arrival_time":datetime(2026,5,25,17,0),
-     "price":800,"ac":False,"total_seats":44,"available_seats":44},
-    {"id":"B4","operator":"Hanif Enterprise","source":"Dhaka","destination":"Sylhet",
-     "departure_time":datetime(2026,5,25,11,0),"arrival_time":datetime(2026,5,25,18,0),
-     "price":900,"ac":False,"total_seats":44,"available_seats":44},
-    {"id":"B5","operator":"Shohag Paribahan","source":"Dhaka","destination":"Sylhet",
-     "departure_time":datetime(2026,5,25,23,0),"arrival_time":datetime(2026,5,26,5,0),
-     "price":950,"ac":True,"total_seats":40,"available_seats":40},
-
+    {"operator":"Shohag Paribahan","source":"Dhaka","destination":"Sylhet",
+     "dep_time":"08:00","arr_time":"15:00","price":950,"ac":True,"total_seats":40},
+    {"operator":"Green Line","source":"Dhaka","destination":"Sylhet",
+     "dep_time":"07:30","arr_time":"13:30","price":1350,"ac":True,"total_seats":36},
+    {"operator":"Ena Transport","source":"Dhaka","destination":"Sylhet",
+     "dep_time":"10:00","arr_time":"17:00","price":800,"ac":False,"total_seats":44},
+    {"operator":"Hanif Enterprise","source":"Dhaka","destination":"Sylhet",
+     "dep_time":"11:00","arr_time":"18:00","price":900,"ac":False,"total_seats":44},
+    {"operator":"Shohag Paribahan","source":"Dhaka","destination":"Sylhet",
+     "dep_time":"23:00","arr_time":"05:00+1","price":950,"ac":True,"total_seats":40},
     # Dhaka ↔ Chittagong
-    {"id":"B6","operator":"Soudia","source":"Dhaka","destination":"Chittagong",
-     "departure_time":datetime(2026,5,25,9,0),"arrival_time":datetime(2026,5,25,16,0),
-     "price":850,"ac":True,"total_seats":40,"available_seats":40},
-    {"id":"B7","operator":"TR Travels","source":"Dhaka","destination":"Chittagong",
-     "departure_time":datetime(2026,5,25,10,30),"arrival_time":datetime(2026,5,25,17,30),
-     "price":750,"ac":False,"total_seats":48,"available_seats":48},
-    {"id":"B8","operator":"Green Line","source":"Dhaka","destination":"Chittagong",
-     "departure_time":datetime(2026,5,25,8,0),"arrival_time":datetime(2026,5,25,14,30),
-     "price":1200,"ac":True,"total_seats":36,"available_seats":36},
-    {"id":"B9","operator":"Shyamoli Paribahan","source":"Dhaka","destination":"Chittagong",
-     "departure_time":datetime(2026,5,25,22,0),"arrival_time":datetime(2026,5,26,5,0),
-     "price":700,"ac":False,"total_seats":52,"available_seats":52},
-
+    {"operator":"Soudia","source":"Dhaka","destination":"Chittagong",
+     "dep_time":"09:00","arr_time":"16:00","price":850,"ac":True,"total_seats":40},
+    {"operator":"TR Travels","source":"Dhaka","destination":"Chittagong",
+     "dep_time":"10:30","arr_time":"17:30","price":750,"ac":False,"total_seats":48},
+    {"operator":"Green Line","source":"Dhaka","destination":"Chittagong",
+     "dep_time":"08:00","arr_time":"14:30","price":1200,"ac":True,"total_seats":36},
+    {"operator":"Shyamoli Paribahan","source":"Dhaka","destination":"Chittagong",
+     "dep_time":"22:00","arr_time":"05:00+1","price":700,"ac":False,"total_seats":52},
     # Dhaka ↔ Cox’s Bazar
-    {"id":"B10","operator":"Shohag Paribahan","source":"Dhaka","destination":"Cox's Bazar",
-     "departure_time":datetime(2026,5,25,22,0),"arrival_time":datetime(2026,5,26,8,0),
-     "price":1200,"ac":True,"total_seats":36,"available_seats":36},
-    {"id":"B11","operator":"Green Line","source":"Dhaka","destination":"Cox's Bazar",
-     "departure_time":datetime(2026,5,25,21,30),"arrival_time":datetime(2026,5,26,7,30),
-     "price":1500,"ac":True,"total_seats":36,"available_seats":36},
-    {"id":"B12","operator":"Saintmartin Paribahan","source":"Dhaka","destination":"Cox's Bazar",
-     "departure_time":datetime(2026,5,25,20,0),"arrival_time":datetime(2026,5,26,6,0),
-     "price":1000,"ac":False,"total_seats":40,"available_seats":40},
-
+    {"operator":"Shohag Paribahan","source":"Dhaka","destination":"Cox's Bazar",
+     "dep_time":"22:00","arr_time":"08:00+1","price":1200,"ac":True,"total_seats":36},
+    {"operator":"Green Line","source":"Dhaka","destination":"Cox's Bazar",
+     "dep_time":"21:30","arr_time":"07:30+1","price":1500,"ac":True,"total_seats":36},
+    {"operator":"Saintmartin Paribahan","source":"Dhaka","destination":"Cox's Bazar",
+     "dep_time":"20:00","arr_time":"06:00+1","price":1000,"ac":False,"total_seats":40},
     # Dhaka ↔ Rajshahi
-    {"id":"B13","operator":"Hanif Enterprise","source":"Dhaka","destination":"Rajshahi",
-     "departure_time":datetime(2026,5,25,6,0),"arrival_time":datetime(2026,5,25,12,0),
-     "price":1100,"ac":True,"total_seats":36,"available_seats":36},
-    {"id":"B14","operator":"National Travels","source":"Dhaka","destination":"Rajshahi",
-     "departure_time":datetime(2026,5,25,7,30),"arrival_time":datetime(2026,5,25,13,30),
-     "price":900,"ac":False,"total_seats":44,"available_seats":44},
-
+    {"operator":"Hanif Enterprise","source":"Dhaka","destination":"Rajshahi",
+     "dep_time":"06:00","arr_time":"12:00","price":1100,"ac":True,"total_seats":36},
+    {"operator":"National Travels","source":"Dhaka","destination":"Rajshahi",
+     "dep_time":"07:30","arr_time":"13:30","price":900,"ac":False,"total_seats":44},
     # Dhaka ↔ Khulna
-    {"id":"B15","operator":"Shohag Paribahan","source":"Dhaka","destination":"Khulna",
-     "departure_time":datetime(2026,5,25,8,0),"arrival_time":datetime(2026,5,25,14,0),
-     "price":1000,"ac":True,"total_seats":40,"available_seats":40},
-    {"id":"B16","operator":"Soudia","source":"Dhaka","destination":"Khulna",
-     "departure_time":datetime(2026,5,25,10,0),"arrival_time":datetime(2026,5,25,17,0),
-     "price":800,"ac":False,"total_seats":44,"available_seats":44},
-
+    {"operator":"Shohag Paribahan","source":"Dhaka","destination":"Khulna",
+     "dep_time":"08:00","arr_time":"14:00","price":1000,"ac":True,"total_seats":40},
+    {"operator":"Soudia","source":"Dhaka","destination":"Khulna",
+     "dep_time":"10:00","arr_time":"17:00","price":800,"ac":False,"total_seats":44},
     # Dhaka ↔ Comilla
-    {"id":"B17","operator":"TR Travels","source":"Dhaka","destination":"Comilla",
-     "departure_time":datetime(2026,5,25,9,0),"arrival_time":datetime(2026,5,25,11,0),
-     "price":400,"ac":False,"total_seats":48,"available_seats":48},
-    {"id":"B18","operator":"Green Line","source":"Dhaka","destination":"Comilla",
-     "departure_time":datetime(2026,5,25,10,30),"arrival_time":datetime(2026,5,25,12,30),
-     "price":550,"ac":True,"total_seats":36,"available_seats":36},
-
+    {"operator":"TR Travels","source":"Dhaka","destination":"Comilla",
+     "dep_time":"09:00","arr_time":"11:00","price":400,"ac":False,"total_seats":48},
+    {"operator":"Green Line","source":"Dhaka","destination":"Comilla",
+     "dep_time":"10:30","arr_time":"12:30","price":550,"ac":True,"total_seats":36},
     # Dhaka ↔ Barisal
-    {"id":"B19","operator":"Shohag Paribahan","source":"Dhaka","destination":"Barisal",
-     "departure_time":datetime(2026,5,25,6,0),"arrival_time":datetime(2026,5,25,12,0),
-     "price":900,"ac":True,"total_seats":36,"available_seats":36},
-    {"id":"B20","operator":"Hanif Enterprise","source":"Dhaka","destination":"Barisal",
-     "departure_time":datetime(2026,5,25,8,0),"arrival_time":datetime(2026,5,25,14,0),
-     "price":700,"ac":False,"total_seats":44,"available_seats":44},
-
+    {"operator":"Shohag Paribahan","source":"Dhaka","destination":"Barisal",
+     "dep_time":"06:00","arr_time":"12:00","price":900,"ac":True,"total_seats":36},
+    {"operator":"Hanif Enterprise","source":"Dhaka","destination":"Barisal",
+     "dep_time":"08:00","arr_time":"14:00","price":700,"ac":False,"total_seats":44},
     # Dhaka ↔ Kishoreganj
-    {"id":"B21","operator":"Anondo Paribahan","source":"Dhaka","destination":"Kishoreganj",
-     "departure_time":datetime(2026,5,25,7,0),"arrival_time":datetime(2026,5,25,10,0),
-     "price":350,"ac":False,"total_seats":40,"available_seats":40},
-    {"id":"B22","operator":"BRTC","source":"Dhaka","destination":"Kishoreganj",
-     "departure_time":datetime(2026,5,25,11,0),"arrival_time":datetime(2026,5,25,14,0),
-     "price":300,"ac":False,"total_seats":52,"available_seats":52},
-    {"id":"B23","operator":"Shohag Paribahan","source":"Dhaka","destination":"Kishoreganj",
-     "departure_time":datetime(2026,5,25,15,0),"arrival_time":datetime(2026,5,25,18,0),
-     "price":450,"ac":True,"total_seats":36,"available_seats":36},
-
+    {"operator":"Anondo Paribahan","source":"Dhaka","destination":"Kishoreganj",
+     "dep_time":"07:00","arr_time":"10:00","price":350,"ac":False,"total_seats":40},
+    {"operator":"BRTC","source":"Dhaka","destination":"Kishoreganj",
+     "dep_time":"11:00","arr_time":"14:00","price":300,"ac":False,"total_seats":52},
+    {"operator":"Shohag Paribahan","source":"Dhaka","destination":"Kishoreganj",
+     "dep_time":"15:00","arr_time":"18:00","price":450,"ac":True,"total_seats":36},
     # Dhaka ↔ Chandpur
-    {"id":"B24","operator":"Meghna Express","source":"Dhaka","destination":"Chandpur",
-     "departure_time":datetime(2026,5,25,8,0),"arrival_time":datetime(2026,5,25,13,0),
-     "price":500,"ac":False,"total_seats":44,"available_seats":44},
-    {"id":"B25","operator":"Padma Express","source":"Dhaka","destination":"Chandpur",
-     "departure_time":datetime(2026,5,25,13,0),"arrival_time":datetime(2026,5,25,18,0),
-     "price":600,"ac":True,"total_seats":36,"available_seats":36},
-
+    {"operator":"Meghna Express","source":"Dhaka","destination":"Chandpur",
+     "dep_time":"08:00","arr_time":"13:00","price":500,"ac":False,"total_seats":44},
+    {"operator":"Padma Express","source":"Dhaka","destination":"Chandpur",
+     "dep_time":"13:00","arr_time":"18:00","price":600,"ac":True,"total_seats":36},
     # Dhaka ↔ Mymensingh
-    {"id":"B26","operator":"Ena Transport","source":"Dhaka","destination":"Mymensingh",
-     "departure_time":datetime(2026,5,25,9,0),"arrival_time":datetime(2026,5,25,12,0),
-     "price":400,"ac":False,"total_seats":44,"available_seats":44},
-    {"id":"B27","operator":"Shohag Paribahan","source":"Dhaka","destination":"Mymensingh",
-     "departure_time":datetime(2026,5,25,11,0),"arrival_time":datetime(2026,5,25,14,0),
-     "price":550,"ac":True,"total_seats":36,"available_seats":36},
-
+    {"operator":"Ena Transport","source":"Dhaka","destination":"Mymensingh",
+     "dep_time":"09:00","arr_time":"12:00","price":400,"ac":False,"total_seats":44},
+    {"operator":"Shohag Paribahan","source":"Dhaka","destination":"Mymensingh",
+     "dep_time":"11:00","arr_time":"14:00","price":550,"ac":True,"total_seats":36},
     # Dhaka ↔ Rangpur
-    {"id":"B28","operator":"Hanif Enterprise","source":"Dhaka","destination":"Rangpur",
-     "departure_time":datetime(2026,5,25,8,0),"arrival_time":datetime(2026,5,25,14,0),
-     "price":1000,"ac":True,"total_seats":40,"available_seats":40},
-    {"id":"B29","operator":"National Travels","source":"Dhaka","destination":"Rangpur",
-     "departure_time":datetime(2026,5,25,22,0),"arrival_time":datetime(2026,5,26,4,0),
-     "price":800,"ac":False,"total_seats":48,"available_seats":48},
-
+    {"operator":"Hanif Enterprise","source":"Dhaka","destination":"Rangpur",
+     "dep_time":"08:00","arr_time":"14:00","price":1000,"ac":True,"total_seats":40},
+    {"operator":"National Travels","source":"Dhaka","destination":"Rangpur",
+     "dep_time":"22:00","arr_time":"04:00+1","price":800,"ac":False,"total_seats":48},
     # Dhaka ↔ Bogra
-    {"id":"B30","operator":"Shyamoli Paribahan","source":"Dhaka","destination":"Bogra",
-     "departure_time":datetime(2026,5,25,7,0),"arrival_time":datetime(2026,5,25,12,0),
-     "price":700,"ac":False,"total_seats":44,"available_seats":44},
-    {"id":"B31","operator":"Green Line","source":"Dhaka","destination":"Bogra",
-     "departure_time":datetime(2026,5,25,10,0),"arrival_time":datetime(2026,5,25,15,0),
-     "price":900,"ac":True,"total_seats":36,"available_seats":36},
-
+    {"operator":"Shyamoli Paribahan","source":"Dhaka","destination":"Bogra",
+     "dep_time":"07:00","arr_time":"12:00","price":700,"ac":False,"total_seats":44},
+    {"operator":"Green Line","source":"Dhaka","destination":"Bogra",
+     "dep_time":"10:00","arr_time":"15:00","price":900,"ac":True,"total_seats":36},
     # Dhaka ↔ Jessore
-    {"id":"B32","operator":"Shohag Paribahan","source":"Dhaka","destination":"Jessore",
-     "departure_time":datetime(2026,5,25,9,0),"arrival_time":datetime(2026,5,25,15,0),
-     "price":1100,"ac":True,"total_seats":40,"available_seats":40},
-    {"id":"B33","operator":"Soudia","source":"Dhaka","destination":"Jessore",
-     "departure_time":datetime(2026,5,25,23,0),"arrival_time":datetime(2026,5,26,5,0),
-     "price":850,"ac":False,"total_seats":44,"available_seats":44},
-
+    {"operator":"Shohag Paribahan","source":"Dhaka","destination":"Jessore",
+     "dep_time":"09:00","arr_time":"15:00","price":1100,"ac":True,"total_seats":40},
+    {"operator":"Soudia","source":"Dhaka","destination":"Jessore",
+     "dep_time":"23:00","arr_time":"05:00+1","price":850,"ac":False,"total_seats":44},
     # Inter‑city (non‑Dhaka)
-    {"id":"B34","operator":"Ena Transport","source":"Sylhet","destination":"Chittagong",
-     "departure_time":datetime(2026,5,25,7,0),"arrival_time":datetime(2026,5,25,15,0),
-     "price":1200,"ac":False,"total_seats":44,"available_seats":44},
-    {"id":"B35","operator":"Green Line","source":"Chittagong","destination":"Cox's Bazar",
-     "departure_time":datetime(2026,5,25,8,0),"arrival_time":datetime(2026,5,25,11,30),
-     "price":600,"ac":True,"total_seats":36,"available_seats":36},
-    {"id":"B36","operator":"Hanif Enterprise","source":"Rajshahi","destination":"Khulna",
-     "departure_time":datetime(2026,5,25,10,0),"arrival_time":datetime(2026,5,25,17,0),
-     "price":950,"ac":False,"total_seats":44,"available_seats":44},
-
-    # Kishoreganj ↔ Chandpur (already present)
-    {"id":"B37","operator":"Local Express","source":"Kishoreganj","destination":"Chandpur",
-     "departure_time":datetime(2026,5,25,6,0),"arrival_time":datetime(2026,5,25,10,0),
-     "price":450,"ac":False,"total_seats":40,"available_seats":40},
-
-    # ========== REVERSE ROUTES ==========
-    # Sylhet → Dhaka
-    {"id":"R1","operator":"Shohag Paribahan","source":"Sylhet","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,8,0),"arrival_time":datetime(2026,5,25,15,0),
-     "price":950,"ac":True,"total_seats":40,"available_seats":40},
-    {"id":"R2","operator":"Green Line","source":"Sylhet","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,7,30),"arrival_time":datetime(2026,5,25,13,30),
-     "price":1350,"ac":True,"total_seats":36,"available_seats":36},
-    # Chittagong → Dhaka
-    {"id":"R3","operator":"Soudia","source":"Chittagong","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,9,0),"arrival_time":datetime(2026,5,25,16,0),
-     "price":850,"ac":True,"total_seats":40,"available_seats":40},
-    {"id":"R4","operator":"TR Travels","source":"Chittagong","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,10,30),"arrival_time":datetime(2026,5,25,17,30),
-     "price":750,"ac":False,"total_seats":48,"available_seats":48},
-    # Cox's Bazar → Dhaka
-    {"id":"R5","operator":"Shohag Paribahan","source":"Cox's Bazar","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,22,0),"arrival_time":datetime(2026,5,26,8,0),
-     "price":1200,"ac":True,"total_seats":36,"available_seats":36},
-    # Rajshahi → Dhaka
-    {"id":"R6","operator":"Hanif Enterprise","source":"Rajshahi","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,6,0),"arrival_time":datetime(2026,5,25,12,0),
-     "price":1100,"ac":True,"total_seats":36,"available_seats":36},
-    # Khulna → Dhaka
-    {"id":"R7","operator":"Shohag Paribahan","source":"Khulna","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,8,0),"arrival_time":datetime(2026,5,25,14,0),
-     "price":1000,"ac":True,"total_seats":40,"available_seats":40},
-    # Comilla → Dhaka
-    {"id":"R8","operator":"TR Travels","source":"Comilla","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,9,0),"arrival_time":datetime(2026,5,25,11,0),
-     "price":400,"ac":False,"total_seats":48,"available_seats":48},
-    # Barisal → Dhaka
-    {"id":"R9","operator":"Shohag Paribahan","source":"Barisal","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,6,0),"arrival_time":datetime(2026,5,25,12,0),
-     "price":900,"ac":True,"total_seats":36,"available_seats":36},
-    # Kishoreganj → Dhaka (the missing one)
-    {"id":"R10","operator":"Anondo Paribahan","source":"Kishoreganj","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,7,30),"arrival_time":datetime(2026,5,25,10,30),
-     "price":350,"ac":False,"total_seats":40,"available_seats":40},
-    # Chandpur → Dhaka
-    {"id":"R11","operator":"Meghna Express","source":"Chandpur","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,8,0),"arrival_time":datetime(2026,5,25,13,0),
-     "price":500,"ac":False,"total_seats":44,"available_seats":44},
-    # Mymensingh → Dhaka
-    {"id":"R12","operator":"Ena Transport","source":"Mymensingh","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,9,0),"arrival_time":datetime(2026,5,25,12,0),
-     "price":400,"ac":False,"total_seats":44,"available_seats":44},
-    # Rangpur → Dhaka
-    {"id":"R13","operator":"Hanif Enterprise","source":"Rangpur","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,8,0),"arrival_time":datetime(2026,5,25,14,0),
-     "price":1000,"ac":True,"total_seats":40,"available_seats":40},
-    # Bogra → Dhaka
-    {"id":"R14","operator":"Shyamoli Paribahan","source":"Bogra","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,7,0),"arrival_time":datetime(2026,5,25,12,0),
-     "price":700,"ac":False,"total_seats":44,"available_seats":44},
-    # Jessore → Dhaka
-    {"id":"R15","operator":"Shohag Paribahan","source":"Jessore","destination":"Dhaka",
-     "departure_time":datetime(2026,5,25,9,0),"arrival_time":datetime(2026,5,25,15,0),
-     "price":1100,"ac":True,"total_seats":40,"available_seats":40},
-    # Chittagong → Sylhet (reverse of B34)
-    {"id":"R16","operator":"Ena Transport","source":"Chittagong","destination":"Sylhet",
-     "departure_time":datetime(2026,5,25,7,0),"arrival_time":datetime(2026,5,25,15,0),
-     "price":1200,"ac":False,"total_seats":44,"available_seats":44},
-    # Cox's Bazar → Chittagong (reverse of B35)
-    {"id":"R17","operator":"Green Line","source":"Cox's Bazar","destination":"Chittagong",
-     "departure_time":datetime(2026,5,25,8,0),"arrival_time":datetime(2026,5,25,11,30),
-     "price":600,"ac":True,"total_seats":36,"available_seats":36},
-    # Khulna → Rajshahi (reverse of B36)
-    {"id":"R18","operator":"Hanif Enterprise","source":"Khulna","destination":"Rajshahi",
-     "departure_time":datetime(2026,5,25,10,0),"arrival_time":datetime(2026,5,25,17,0),
-     "price":950,"ac":False,"total_seats":44,"available_seats":44},
-    # Chandpur → Kishoreganj (reverse of B37)
-    {"id":"R19","operator":"Local Express","source":"Chandpur","destination":"Kishoreganj",
-     "departure_time":datetime(2026,5,25,10,0),"arrival_time":datetime(2026,5,25,14,0),
-     "price":450,"ac":False,"total_seats":40,"available_seats":40},
+    {"operator":"Ena Transport","source":"Sylhet","destination":"Chittagong",
+     "dep_time":"07:00","arr_time":"15:00","price":1200,"ac":False,"total_seats":44},
+    {"operator":"Green Line","source":"Chittagong","destination":"Cox's Bazar",
+     "dep_time":"08:00","arr_time":"11:30","price":600,"ac":True,"total_seats":36},
+    {"operator":"Hanif Enterprise","source":"Rajshahi","destination":"Khulna",
+     "dep_time":"10:00","arr_time":"17:00","price":950,"ac":False,"total_seats":44},
+    {"operator":"Local Express","source":"Kishoreganj","destination":"Chandpur",
+     "dep_time":"06:00","arr_time":"10:00","price":450,"ac":False,"total_seats":40},
 ]
+
+def generate_schedules():
+    """Create BusRoute objects for the next 7 days, with unique IDs and random availability."""
+    today = datetime.now().date()
+    bus_objects = []
+    global_id = 1
+
+    for day_offset in range(7):          # 0 = today, 1 = tomorrow, … 6
+        date = today + timedelta(days=day_offset)
+        for route in BASE_ROUTES:
+            dep_h, dep_m = map(int, route["dep_time"].split(":"))
+            arr_raw = route["arr_time"]
+            # Handle "+1" suffix (next day arrival)
+            next_day = False
+            if "+1" in arr_raw:
+                next_day = True
+                arr_raw = arr_raw.replace("+1", "")
+            arr_h, arr_m = map(int, arr_raw.split(":"))
+
+            dep_dt = datetime(date.year, date.month, date.day, dep_h, dep_m)
+            arr_dt = datetime(date.year, date.month, date.day, arr_h, arr_m)
+            if next_day:
+                arr_dt += timedelta(days=1)
+
+            # simulate random bookings: available seats = 70‑100% of total
+            avail = random.randint(int(route["total_seats"] * 0.7), route["total_seats"])
+
+            bus_id = f"BUS-{global_id:04d}"      # simple unique ID
+            bus_objects.append(BusRoute(
+                id=bus_id,
+                operator=route["operator"],
+                source=route["source"],
+                destination=route["destination"],
+                departure_time=dep_dt,
+                arrival_time=arr_dt,
+                price=route["price"],
+                ac=route["ac"],
+                total_seats=route["total_seats"],
+                available_seats=avail
+            ))
+            global_id += 1
+
+    return bus_objects
 
 async def seed():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     async with AsyncSessionLocal() as session:
+        # check if already seeded
         existing = (await session.execute(select(BusRoute))).scalars().first()
         if existing:
-            print("Database already seeded. Delete travel_ai.db to re‑seed from scratch.")
+            print("Database already seeded. Delete travel_ai.db first.")
             return
-        for bus in BUS_SEED_DATA:
-            session.add(BusRoute(**bus))
+        buses = generate_schedules()
+        session.add_all(buses)
         await session.commit()
-        print(f"Database seeded successfully with {len(BUS_SEED_DATA)} routes (including returns).")
+        print(f"Seeded {len(buses)} buses across 7 days.")
 
 if __name__ == "__main__":
     asyncio.run(seed())

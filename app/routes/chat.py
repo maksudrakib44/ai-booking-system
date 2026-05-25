@@ -61,6 +61,12 @@ async def chat(
     ai_messages = [m for m in result["messages"] if m.type == "ai"]
     if not ai_messages:
         raise HTTPException(status_code=500, detail="Agent did not produce a response.")
+
+    # Gemini sometimes returns a list of content parts – convert to string
     reply = ai_messages[-1].content
+    if isinstance(reply, list):
+        reply = "".join(part.get("text", "") for part in reply if part.get("type") == "text")
+    elif not isinstance(reply, str):
+        reply = str(reply)
 
     return ChatResponse(session_id=session_id, response=reply)

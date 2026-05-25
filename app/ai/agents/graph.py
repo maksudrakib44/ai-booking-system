@@ -2,28 +2,48 @@ from typing import Literal
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langchain_core.messages import SystemMessage
-from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 from app.ai.agents.state import AgentState
 from app.ai.tools.bus_tools import search_bus_routes, check_seat_availability, book_ticket
 from app.ai.prompts.system_prompt import SYSTEM_PROMPT
 from app.config import settings
+from datetime import datetime
+import pytz
 
-# Free Groq model with very high rate limits (14,400 requests/day)
-llm = ChatGroq(
-    model="llama-3.1-8b-instant",
-    api_key=settings.GROQ_API_KEY,
+# Gemini LLM (free tier)
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    google_api_key=settings.GEMINI_API_KEY,
     temperature=0.2,
 )
 
-tools = [search_bus_routes, check_seat_availability, book_ticket] # Define available tools for the agent 
-llm_with_tools = llm.bind_tools(tools) # this allows the LLM to call these tools during the conversation
+tools = [search_bus_routes, check_seat_availability, book_ticket]
+llm_with_tools = llm.bind_tools(tools)
 
 async def agent_node(state: AgentState) -> dict:
-    """Async agent node – awaits the LLM call and returns updated state.""" # The state is a dict that includes the conversation history and any other relevant info. The LLM can read and update this state.
+    """Async agent node – injects user ID, Bangladesh current time, and calls the LLM."""
     messages = state["messages"]
     system_msg = SystemMessage(content=SYSTEM_PROMPT)
-    # Use async invocation to avoid blocking the event loop
-    response = await llm_with_tools.ainvoke([system_msg] + messages)
+
+    # Let the LLM know which user is talking (so it never asks for user ID)
+    user_context = SystemMessage(
+        content=f"The current user's ID is '{state['user_id']}'. "
+                f"Always use this user_id when calling the book_ticket tool. "
+                f"Never ask the user for their user ID."
+    )
+
+    # Let the LLM know the exact current date and time in Bangladesh
+    now_dhaka = datetime.now(pytz.timezone("Asia/Dhaka"))
+    time_context = SystemMessage(
+        content=f"The current date and time in Bangladesh is {now_dhaka.strftime('%Y-%m-%d %H:%M:%S')} (Asia/Dhaka). "
+                f"When a user asks for 'today' or 'now', use date='today' and the tool will automatically "
+                f"show only future departures in Bangladesh local time."
+    )
+
+    # Combine all contexts, then add the conversation history
+    response = await llm_with_tools.ainvoke(
+        [system_msg, user_context, time_context] + messages
+    )
     return {"messages": [response]}
 
 def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
@@ -37,11 +57,11 @@ def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
 workflow = StateGraph(AgentState)
 
 workflow.add_node("agent", agent_node)
-tool_node = ToolNode(tools)          # ToolNode awaits async tools automatically
+tool_node = ToolNode(tools)
 workflow.add_node("tools", tool_node)
 
 workflow.set_entry_point("agent")
 workflow.add_conditional_edges("agent", should_continue)
-workflow.add_edge("tools", "agent")  # loop back after tool execution
+workflow.add_edge("tools", "agent")
 
 app = workflow.compile()
