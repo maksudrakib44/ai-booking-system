@@ -1,23 +1,20 @@
 import streamlit as st
-import uuid
 import asyncio
+import uuid
 from datetime import datetime
 import pytz
 
 # LangChain / LangGraph
 from langchain_core.messages import HumanMessage
 from app.ai.agents.graph import app as agent_app
-from app.ai.agents.state import AgentState
 from app.dependencies import get_user_by_token
-from app.database.session import AsyncSessionLocal
 from app.database.models import User
-from app.config import settings
-from app.database.seed import seed  # will run once to create DB if missing
+from app.database.seed import seed
 
 # ---------- Page Config ----------
 st.set_page_config(page_title="RouteMind AI", page_icon="🚌", layout="centered")
 
-# ---------- Custom CSS (same as before) ----------
+# ---------- Custom CSS ----------
 st.markdown("""
 <style>
 .chat-bubble {
@@ -62,14 +59,13 @@ if "agent_state" not in st.session_state:
 st.title("🚌 RouteMind AI")
 st.caption("Your intelligent travel booking copilot — ask me anything about buses!")
 
-# ---------- Sidebar Settings ----------
+# ---------- Sidebar ----------
 with st.sidebar:
     st.subheader("⚙️ Settings")
     user_token = st.text_input("Your User Token", value=st.session_state.user_token,
                                help="Unique string to remember preferences. Empty = anonymous.")
     if user_token != st.session_state.user_token:
         st.session_state.user_token = user_token
-        # reset session if token changes
         st.session_state.session_id = str(uuid.uuid4())
         st.session_state.messages = []
         st.session_state.agent_state = {
@@ -97,32 +93,15 @@ with st.sidebar:
         }
         st.rerun()
 
-# ---------- Initialise Database (once) ----------
+# ---------- DB initialisation ----------
 @st.cache_resource
 def init_db():
-    # seed the database if it doesn't exist (creates tables + 7-day data)
     asyncio.run(seed())
     return True
 
 _ = init_db()
 
-# ---------- Resolve User ----------
-async def resolve_user():
-    token = st.session_state.user_token or None
-    if not token:
-        return None
-    async with AsyncSessionLocal() as db:
-        from sqlalchemy import select
-        result = await db.execute(select(User).where(User.token == token))
-        user = result.scalars().first()
-        if not user:
-            user = User(token=token, preferences={})
-            db.add(user)
-            await db.commit()
-            await db.refresh(user)
-        return user
-
-# ---------- Chat Display ----------
+# ---------- Display chat ----------
 for msg in st.session_state.messages:
     if msg["role"] == "user":
         st.markdown(f'<div class="chat-bubble user-bubble">{msg["content"]}</div>', unsafe_allow_html=True)
@@ -133,11 +112,10 @@ for msg in st.session_state.messages:
 prompt = st.chat_input("Where would you like to go today?")
 
 if prompt:
-    # Add user message
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # Determine user_id
-    user = asyncio.run(resolve_user())
+    # Resolve user
+    user = asyncio.run(get_user_by_token(st.session_state.user_token or None))
     user_id = str(user.id) if user else "anonymous"
 
     # Update agent state
@@ -147,7 +125,7 @@ if prompt:
         state["user_preferences"] = user.preferences
     state["messages"].append(HumanMessage(content=prompt))
 
-    # Call the agent directly (async)
+    # Run agent
     try:
         new_state = asyncio.run(agent_app.ainvoke(state))
     except Exception as e:
@@ -155,15 +133,14 @@ if prompt:
         st.session_state.messages.append({"role": "assistant", "content": reply})
         st.rerun()
 
-    # Update stored state
     st.session_state.agent_state = new_state
 
-    # Extract the last AI message
+    # Extract reply
     ai_messages = [m for m in new_state["messages"] if m.type == "ai"]
     if ai_messages:
         reply = ai_messages[-1].content
         if isinstance(reply, list):
-            reply = "".join(part.get("text", "") for part in reply if part["type"] == "text")
+            reply = "".join(part.get("text", "") for part in reply if part.get("type") == "text")
         st.session_state.messages.append({"role": "assistant", "content": reply})
     else:
         st.session_state.messages.append({"role": "assistant", "content": "I didn't get that."})
@@ -174,7 +151,7 @@ if prompt:
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: #64748B; padding: 16px;'>"
-    "Built with ❤️ by <strong>Md. Maksudul Haque</strong><br>"
+    "Built with ❤️ by <strong>Maksudur Rahman</strong><br>"
     "© 2026 RouteMind AI — AI-Powered Travel Booking Assistant"
     "</div>",
     unsafe_allow_html=True
